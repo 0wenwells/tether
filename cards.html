@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Tether Cards</title>
+<style>
+/* Layout: one marker centred on white, card picker along the bottom */
+:root{--paper:#ffffff;--ink:#111111;--muted:#6b6b6b;--line:#dddddd;--font:system-ui,-apple-system,"Segoe UI",sans-serif;color-scheme:light}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--paper);color:var(--ink);font:14px/1.4 var(--font);display:flex;flex-direction:column}
+#show{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;cursor:pointer}
+#marker{width:min(80vw,62vh);aspect-ratio:1;max-width:100%}
+#name{font-weight:600;letter-spacing:.08em;text-transform:uppercase}
+#hint{color:var(--muted);font-size:12px;text-align:center}
+#pick{display:flex;gap:8px;justify-content:center;padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line)}
+#pick button{font:600 13px/1 var(--font);padding:10px 14px;border:1px solid var(--line);background:var(--paper);color:var(--ink);cursor:pointer}
+#pick button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+</style>
+</head>
+<body>
+<div id="show" title="Tap for full screen">
+  <svg id="marker" viewBox="0 0 10 10" shape-rendering="crispEdges" role="img" aria-label="Marker"></svg>
+  <div id="name"></div>
+  <div id="hint">Turn brightness up · tap for full screen</div>
+</div>
+<div id="pick"></div>
+<script>
+// ArUco MIP 36h12, ids 0–3 (same cards as tether-cards.pdf)
+const CARDS = [
+  { name: "Circle",   bits: "110100101011011000111010000010011101" },
+  { name: "Triangle", bits: "011000000000000100010011010011100101" },
+  { name: "Square",   bits: "000100100000011011111011111001110010" },
+  { name: "Hexagon",  bits: "111111111000101011010110110010110100" },
+];
+const svg = document.getElementById("marker");
+function show(id) {
+  const b = CARDS[id].bits;
+  let s = '<rect width="10" height="10" fill="#fff"/><rect x="1" y="1" width="8" height="8" fill="#000"/>';
+  for (let y = 0; y < 6; y++) for (let x = 0; x < 6; x++)
+    if (b[y * 6 + x] === "1") s += `<rect x="${x + 2}" y="${y + 2}" width="1" height="1" fill="#fff"/>`;
+  svg.innerHTML = s;
+  document.getElementById("name").textContent = `${id} · ${CARDS[id].name}`;
+  document.querySelectorAll("#pick button").forEach((el, i) => el.setAttribute("aria-pressed", String(i === id)));
+  try { localStorage.setItem("tether-card", id); } catch {}
+}
+CARDS.forEach((c, i) => {
+  const btn = document.createElement("button");
+  btn.textContent = `${i} ${c.name}`;
+  btn.onclick = () => show(i);
+  document.getElementById("pick").append(btn);
+});
+document.getElementById("show").onclick = () => {
+  const el = document.documentElement;
+  if (!document.fullscreenElement && el.requestFullscreen) el.requestFullscreen().catch(() => {});
+  else if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+};
+let start = 0;
+try { start = +(localStorage.getItem("tether-card") || 0); } catch {}
+show(start >= 0 && start < 4 ? start : 0);
+</script>
+</body>
+</html>
