@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Tether</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: camera stage fills the screen, one control rail along the bottom */
+:root{
+  --ground:#101214; --panel:#1a1d20; --line:#2c3136;
+  --ink:#e9ecee; --muted:#8b949c; --accent:#ff4d6d;
+  --ok:#3ddc84; --warn:#ffb020;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--ground);color:var(--ink);font:14px/1.45 var(--sans);display:flex;flex-direction:column;overflow:hidden}
+[hidden]{display:none!important}
+
+#stage{position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding-top:env(safe-area-inset-top,0px)}
+#view{position:relative;background:#000}
+#view.mirror{transform:scaleX(-1)}
+#view video,#view canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+#chips{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));left:16px;display:flex;flex-wrap:wrap;gap:6px}
+.chip{font:500 11px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:7px 10px;border:1px solid var(--line);background:color-mix(in srgb,var(--ground) 80%,transparent);display:flex;gap:8px;align-items:center;color:var(--muted)}
+.chip i{width:7px;height:7px;border-radius:50%;background:var(--line)}
+.chip.on{color:var(--ink)} .chip.on i{background:var(--ok)}
+.chip.stale i{background:var(--warn)}
+#readout{position:absolute;bottom:12px;left:16px;font:500 11px/1.4 var(--mono);color:var(--muted);font-variant-numeric:tabular-nums;background:color-mix(in srgb,var(--ground) 80%,transparent);padding:6px 9px;border:1px solid var(--line)}
+
+#start{position:absolute;inset:0;display:grid;place-items:center;padding:16px}
+#start .card{max-width:31rem;border:1px solid var(--line);background:var(--panel);padding:24px;display:grid;gap:14px}
+#start h1{margin:0;font:600 22px/1.2 var(--sans);text-wrap:balance}
+#start p{margin:0;color:var(--muted)}
+#start ol{margin:0;padding-left:1.2em;color:var(--muted);display:grid;gap:4px}
+#start .err{color:var(--warn)}
+
+#bar{border-top:1px solid var(--line);background:var(--panel);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center}
+.group{display:flex;align-items:center;gap:8px}
+.label{font:500 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.out{font:500 12px/1 var(--mono);min-width:4.5ch;font-variant-numeric:tabular-nums}
+input[type=range]{width:96px;accent-color:var(--accent)}
+button.tool{font:500 12px/1 var(--sans);color:var(--ink);background:transparent;border:1px solid var(--line);padding:9px 12px;cursor:pointer}
+button.tool:hover{border-color:var(--muted)}
+button.tool[aria-pressed="true"]{background:var(--ink);color:var(--ground);border-color:var(--ink)}
+button.primary{font:600 14px/1 var(--sans);color:#fff;background:var(--accent);border:0;padding:12px 16px;cursor:pointer;justify-self:start}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <div id="view">
+    <video id="video" playsinline muted></video>
+    <canvas id="gl"></canvas>
+  </div>
+  <div id="chips"></div>
+  <div id="readout">–</div>
+  <div id="start">
+    <div class="card">
+      <h1>Two printed cards. One tube between them.</h1>
+      <ol>
+        <li>Print the card sheet at 100%. The black squares must be 50 mm.</li>
+        <li>Lay any two cards on a table, 15–40 cm apart.</li>
+        <li>Point the camera so both cards are in view.</li>
+      </ol>
+      <p>The tube is a simulated cable pinned to both cards. It sags, rests on the table and swings when you move a card. Its cross-section morphs from one card's shape to the other's.</p>
+      <p id="startErr" class="err" hidden></p>
+      <button class="primary" id="startBtn">Start camera</button>
+    </div>
+  </div>
+</div>
+
+<div id="bar">
+  <div class="group">
+    <label class="label" for="slack">Slack</label>
+    <input id="slack" type="range" min="1" max="2" step="0.01" value="1.25">
+    <span class="out" id="slackOut">1.25×</span>
+  </div>
+  <div class="group">
+    <label class="label" for="radius">Thickness</label>
+    <input id="radius" type="range" min="2" max="20" step="0.5" value="7">
+    <span class="out" id="radiusOut">7 mm</span>
+  </div>
+  <div class="group">
+    <label class="label" for="grav">Gravity</label>
+    <input id="grav" type="range" min="-1" max="1" step="0.05" value="1">
+    <span class="out" id="gravOut">1.00 g ↓</span>
+  </div>
+  <div class="group">
+    <label class="label" for="stiff">Stiffness</label>
+    <input id="stiff" type="range" min="0" max="1" step="0.05" value="0.35">
+    <span class="out" id="stiffOut">0.35</span>
+  </div>
+  <div class="group">
+    <label class="label" for="fov">Lens</label>
+    <input id="fov" type="range" min="45" max="80" step="1" value="62">
+    <span class="out" id="fovOut">62°</span>
+  </div>
+  <div class="group">
+    <button class="tool" id="lockBtn" aria-pressed="false" title="Fix the tube length so pulling the cards apart pulls it taut">Lock length</button>
+    <button class="tool" id="releaseBtn" aria-pressed="false" title="Unpin the second card's end and let it fall">Release end</button>
+    <button class="tool" id="guideBtn" aria-pressed="true">Guides</button>
+  </div>
+  <div class="group">
+    <button class="tool" id="resetBtn">Reset</button>
+    <button class="tool" id="flipBtn">Flip camera</button>
+  </div>
+</div>
+
+<!-- Marker detection + pose (js-aruco2). Order matters: cv, aruco, svd, posit. -->
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2@2.0.0/src/cv.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2@2.0.0/src/aruco.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2@2.0.0/src/svd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2@2.0.0/src/posit1.js"></script>
+
+<script type="module">
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js";
+
+/* ================= Settings ================= */
+const MARKER_MM   = 50;     // printed black square edge
+const CARDS = {             // marker id -> cross-section shape (sides: 0 = circle)
+  0: { name: "Circle",   sides: 0 },
+  1: { name: "Triangle", sides: 3 },
+  2: { name: "Square",   sides: 4 },
+  3: { name: "Hexagon",  sides: 6 },
+};
+const DETECT_W    = 640;    // detection resolution (width)
+const STALE_MS    = 600;    // a card unseen this long shows amber; its end stays where it was
+const N           = 28;     // rope particles
+const SUBSTEPS    = 4;
+const ITERATIONS  = 16;     // constraint passes per substep
+const GRAVITY     = 9810;   // mm/s²
+const DAMPING     = 0.992;
+const FRICTION    = 0.5;    // fraction of sliding speed lost on table contact
+const SEGMENTS    = 72;     // tube rings along its length
+const RING        = 48;     // points per ring (divisible by 3, 4 and 6 so corners land exactly)
+const POS_FOLLOW  = 0.5;    // pose smoothing
+const NRM_FOLLOW  = 0.25;
+
+/* ================= Elements ================= */
+const $ = id => document.getElementById(id);
+const video = $("video"), view = $("view"), stage = $("stage"), glCanvas = $("gl");
+const dcan = document.createElement("canvas");
+const dctx = dcan.getContext("2d", { willReadFrequently: true });
+
+/* ================= State ================= */
+const S = {
+  stream: null, facing: "environment",
+  DW: DETECT_W, DH: 480, hfov: 62, focal: 1,
+  detector: null, posit: null,
+  cards: {},          // id -> { pos, nrm, xAxis, seen }
+  pair: null,         // [idA, idB]
+  rope: null,         // { x: Float64Array, p: Float64Array, length }
+  slack: 1.25, radius: 7, stiffness: 0.35, gravity: 1, locked: false, release: false, guides: true,
+  last: 0,
+};
+
+/* ================= Stage 1: Camera ================= */
+async function startCamera() {
+  if (S.stream) S.stream.getTracks().forEach(t => t.stop());
+  S.stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: S.facing, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false,
+  });
+  video.srcObject = S.stream;
+  await video.play();
+  S.DW = DETECT_W;
+  S.DH = Math.round(DETECT_W * video.videoHeight / video.videoWidth);
+  dcan.width = S.DW; dcan.height = S.DH;
+  view.classList.toggle("mirror", S.facing === "user");
+  setLens(S.hfov);
+  layout();
+}
+
+function layout() {
+  const r = stage.getBoundingClientRect();
+  const s = Math.min(r.width / S.DW, r.height / S.DH);
+  const w = Math.floor(S.DW * s), h = Math.floor(S.DH * s);
+  view.style.width = w + "px"; view.style.height = h + "px";
+  renderer.setSize(w, h, false);
+}
+addEventListener("resize", () => S.stream && layout());
+
+/* ================= Stage 2: Lens (one focal length shared by pose and render) ================= */
+function setLens(hfovDeg) {
+  S.hfov = hfovDeg;
+  S.focal = (S.DW / 2) / Math.tan(THREE.MathUtils.degToRad(hfovDeg) / 2);
+  S.posit = new POS.Posit(MARKER_MM, S.focal);
+  camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan((S.DH / 2) / S.focal));
+  camera.aspect = S.DW / S.DH;
+  camera.updateProjectionMatrix();
+}
+
+/* ================= Stage 3: Cards (detect + pose, in camera space, mm) ================= */
+function detectCards(now) {
+  dctx.drawImage(video, 0, 0, S.DW, S.DH);
+  const img = dctx.getImageData(0, 0, S.DW, S.DH);
+  const markers = S.detector.detect(img);
+  for (const m of markers) {
+    if (!(m.id in CARDS)) continue;
+    const corners = m.corners.map(c => ({ x: c.x - S.DW / 2, y: -(c.y - S.DH / 2) }));
+    const pose = S.posit.pose(corners);
+    const R = pose.bestRotation, t = pose.bestTranslation;
+    // POSIT: x right, y up, z into the scene. three.js camera looks down -z, so flip z.
+    const pos = new THREE.Vector3(t[0], t[1], -t[2]);
+    const nrm = new THREE.Vector3(R[0][2], R[1][2], -R[2][2]).normalize();
+    if (nrm.dot(pos) > 0) nrm.negate();               // face the camera = "up" off the table
+    const xAxis = new THREE.Vector3(R[0][0], R[1][0], -R[2][0]).normalize();
+    const c = S.cards[m.id];
+    if (!c) S.cards[m.id] = { pos, nrm, xAxis, seen: now };
+    else {
+      c.pos.lerp(pos, POS_FOLLOW);
+      c.nrm.lerp(nrm, NRM_FOLLOW).normalize();
+      c.xAxis.lerp(xAxis, NRM_FOLLOW).normalize();
+      c.seen = now;
+    }
+  }
+}
+
+function choosePair() {
+  const ids = Object.keys(S.cards).map(Number).sort((a, b) => a - b);
+  if (ids.length < 2) return null;
+  // Prefer cards seen recently; fall back to the last pair
+  const fresh = ids.filter(id => performance.now() - S.cards[id].seen < 1500);
+  const use = fresh.length >= 2 ? fresh : ids;
+  return [use[0], use[1]];
+}
+
+/* ================= Stage 4: Rope (Verlet, pinned at both cards) ================= */
+function upVector() {
+  const [a, b] = S.pair;
+  return S.cards[a].nrm.clone().add(S.cards[b].nrm).normalize();
+}
+
+function anchors() {
+  const A = S.cards[S.pair[0]], B = S.cards[S.pair[1]];
+  return [
+    A.pos.clone().addScaledVector(A.nrm, S.radius),
+    B.pos.clone().addScaledVector(B.nrm, S.radius),
+  ];
+}
+
+function initRope() {
+  const [a, b] = anchors();
+  const x = new Float64Array(N * 3), p = new Float64Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    const v = a.clone().lerp(b, i / (N - 1));
+    x.set([v.x, v.y, v.z], i * 3); p.set([v.x, v.y, v.z], i * 3);
+  }
+  S.rope = { x, p, length: a.distanceTo(b) * S.slack };
+}
+
+function stepRope(dt) {
+  const { x, p } = S.rope;
+  const up = upVector();
+  const g = up.clone().multiplyScalar(-GRAVITY * S.gravity);   // negative S.gravity = falls upwards
+  const [a, b] = anchors();
+  if (!S.locked) S.rope.length += (a.distanceTo(b) * S.slack - S.rope.length) * 0.2;
+  const rest = S.rope.length / (N - 1);
+
+  // Table plane: through the lower card, facing up
+  const A = S.cards[S.pair[0]].pos, B = S.cards[S.pair[1]].pos;
+  const floor = A.dot(up) < B.dot(up) ? A : B;
+  const floorD = floor.dot(up);
+
+  const h = dt / SUBSTEPS, h2 = h * h;
+  for (let s = 0; s < SUBSTEPS; s++) {
+    for (let i = 0; i < N; i++) {
+      const k = i * 3;
+      for (let d = 0; d < 3; d++) {
+        const v = (x[k + d] - p[k + d]) * DAMPING;
+        p[k + d] = x[k + d];
+        x[k + d] += v + g.getComponent(d) * h2;
+      }
+    }
+    for (let it = 0; it < ITERATIONS; it++) {
+      x[0] = a.x; x[1] = a.y; x[2] = a.z;
+      if (!S.release) { const k = (N - 1) * 3; x[k] = b.x; x[k + 1] = b.y; x[k + 2] = b.z; }
+      for (let i = 0; i < N - 1; i++) {
+        const k = i * 3, j = k + 3;
+        const dx = x[j] - x[k], dy = x[j + 1] - x[k + 1], dz = x[j + 2] - x[k + 2];
+        const len = Math.hypot(dx, dy, dz) || 1e-6;
+        const diff = (len - rest) / len;
+        const wk = i === 0 ? 0 : 0.5;
+        const wj = (i + 1 === N - 1 && !S.release) ? 0 : 0.5;
+        const sum = wk + wj || 1;
+        x[k] += dx * diff * (wk / sum); x[k + 1] += dy * diff * (wk / sum); x[k + 2] += dz * diff * (wk / sum);
+        x[j] -= dx * diff * (wj / sum); x[j + 1] -= dy * diff * (wj / sum); x[j + 2] -= dz * diff * (wj / sum);
+      }
+      // Bending: keep every second particle near its straight-line spacing (0 = rope, 1 = rod)
+      if (S.stiffness > 0) {
+        const rest2 = rest * 2;
+        for (let i = 0; i < N - 2; i++) {
+          const k = i * 3, j = k + 6;
+          const dx = x[j] - x[k], dy = x[j + 1] - x[k + 1], dz = x[j + 2] - x[k + 2];
+          const len = Math.hypot(dx, dy, dz) || 1e-6;
+          if (len >= rest2) continue;
+          const diff = ((len - rest2) / len) * S.stiffness * 0.5;
+          const wk = i === 0 ? 0 : 0.5;
+          const wj = (i + 2 === N - 1 && !S.release) ? 0 : 0.5;
+          const sum = wk + wj || 1;
+          x[k] += dx * diff * (wk / sum); x[k + 1] += dy * diff * (wk / sum); x[k + 2] += dz * diff * (wk / sum);
+          x[j] -= dx * diff * (wj / sum); x[j + 1] -= dy * diff * (wj / sum); x[j + 2] -= dz * diff * (wj / sum);
+        }
+      }
+      // Table contact with friction
+      for (let i = 1; i < N; i++) {
+        const k = i * 3;
+        const height = x[k] * up.x + x[k + 1] * up.y + x[k + 2] * up.z - floorD - S.radius;
+        if (height < 0) {
+          x[k] -= up.x * height; x[k + 1] -= up.y * height; x[k + 2] -= up.z * height;
+          for (let d = 0; d < 3; d++) p[k + d] += (x[k + d] - p[k + d]) * FRICTION;
+        }
+      }
+    }
+  }
+}
+
+/* ================= Stage 5: Profile (cross-section shapes, equal area, radial samples) ================= */
+const VERTEX_ANGLE = { 3: Math.PI / 2, 4: Math.PI / 4, 6: 0 };   // triangle point-up, square and hexagon flat-top
+function profile(sides) {
+  const out = new Float32Array(RING * 2);
+  const scale = sides ? Math.sqrt(Math.PI / ((sides / 2) * Math.sin(2 * Math.PI / sides))) : 1;
+  for (let k = 0; k < RING; k++) {
+    const th = Math.PI / 2 + (2 * Math.PI * k) / RING;
+    let r = 1;
+    if (sides) {
+      const seg = (2 * Math.PI) / sides;
+      let local = (th - VERTEX_ANGLE[sides]) % seg; if (local < 0) local += seg;
+      r = (Math.cos(Math.PI / sides) / Math.cos(local - Math.PI / sides)) * scale;
+    }
+    out[2 * k] = Math.cos(th) * r; out[2 * k + 1] = Math.sin(th) * r;
+  }
+  return out;
+}
+const PROFILES = Object.fromEntries(Object.entries(CARDS).map(([id, c]) => [id, profile(c.sides)]));
+
+/* ================= Stage 6: Tube (rings along the rope, kept upright) ================= */
+const renderer = new THREE.WebGLRenderer({ canvas: glCanvas, alpha: true, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 4 / 3, 1, 20000);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x404048, 1.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.8); sun.position.set(300, 600, 200); scene.add(sun);
+
+const tubeGeo = new THREE.BufferGeometry();
+const VERTS = (SEGMENTS + 1) * RING + 2;
+tubeGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(VERTS * 3), 3));
+{
+  const idx = [];
+  for (let s = 0; s < SEGMENTS; s++) for (let k = 0; k < RING; k++) {
+    const a = s * RING + k, b = s * RING + (k + 1) % RING, c = a + RING, d = b + RING;
+    idx.push(a, c, b, b, c, d);
+  }
+  const capA = VERTS - 2, capB = VERTS - 1, lastRing = SEGMENTS * RING;
+  for (let k = 0; k < RING; k++) {
+    idx.push(capA, (k + 1) % RING, k);
+    idx.push(capB, lastRing + k, lastRing + (k + 1) % RING);
+  }
+  tubeGeo.setIndex(idx);
+}
+const tube = new THREE.Mesh(tubeGeo, new THREE.MeshStandardMaterial({
+  color: 0xff4d6d, roughness: 0.45, metalness: 0.05, flatShading: true, side: THREE.DoubleSide,
+}));
+tube.frustumCulled = false; tube.visible = false;
+scene.add(tube);
+
+const curve = new THREE.CatmullRomCurve3(Array.from({ length: N }, () => new THREE.Vector3()), false, "centripetal");
+const tmp = { pt: new THREE.Vector3(), tan: new THREE.Vector3(), n: new THREE.Vector3(), b: new THREE.Vector3(), prevN: new THREE.Vector3() };
+
+function buildTube() {
+  const { x } = S.rope;
+  for (let i = 0; i < N; i++) curve.points[i].set(x[i * 3], x[i * 3 + 1], x[i * 3 + 2]);
+  curve.updateArcLengths();
+  const up = upVector();
+  const pa = PROFILES[S.pair[0]], pb = PROFILES[S.pair[1]];
+  const pos = tubeGeo.attributes.position.array;
+  const r = S.radius;
+  tmp.prevN.copy(up);
+  for (let s = 0; s <= SEGMENTS; s++) {
+    const u = s / SEGMENTS;
+    curve.getPointAt(u, tmp.pt);
+    curve.getTangentAt(u, tmp.tan);
+    // Ring's "up" = world up with the tangent removed; reuse the last one if the tube hangs vertically
+    tmp.n.copy(up).addScaledVector(tmp.tan, -up.dot(tmp.tan));
+    if (tmp.n.lengthSq() < 1e-4) tmp.n.copy(tmp.prevN); else tmp.n.normalize();
+    tmp.prevN.copy(tmp.n);
+    tmp.b.crossVectors(tmp.tan, tmp.n);
+    const w = u * u * (3 - 2 * u);                     // smoothstep morph A → B
+    for (let k = 0; k < RING; k++) {
+      const px = (pa[2 * k] * (1 - w) + pb[2 * k] * w) * r;
+      const py = (pa[2 * k + 1] * (1 - w) + pb[2 * k + 1] * w) * r;
+      const o = (s * RING + k) * 3;
+      pos[o]     = tmp.pt.x + tmp.b.x * px + tmp.n.x * py;
+      pos[o + 1] = tmp.pt.y + tmp.b.y * px + tmp.n.y * py;
+      pos[o + 2] = tmp.pt.z + tmp.b.z * px + tmp.n.z * py;
+    }
+  }
+  const ends = [curve.getPointAt(0), curve.getPointAt(1)];
+  pos.set([ends[0].x, ends[0].y, ends[0].z], (VERTS - 2) * 3);
+  pos.set([ends[1].x, ends[1].y, ends[1].z], (VERTS - 1) * 3);
+  tubeGeo.attributes.position.needsUpdate = true;
+  tubeGeo.computeVertexNormals();
+  return curve.getLength();
+}
+
+/* ================= Stage 7: Guides (card outline + shape, drawn flat on each card) ================= */
+const guides = {};
+for (const id of Object.keys(CARDS)) {
+  const g = new THREE.Group();
+  const sq = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(
+    [[-1, 1], [1, 1], [1, -1], [-1, -1]].map(([a, b]) => new THREE.Vector3(a * MARKER_MM / 2, b * MARKER_MM / 2, 0))),
+    new THREE.LineBasicMaterial({ color: 0x3ddc84 }));
+  const pr = PROFILES[id], pts = [];
+  for (let k = 0; k < RING; k++) pts.push(new THREE.Vector3(pr[2 * k] * MARKER_MM * 0.3, pr[2 * k + 1] * MARKER_MM * 0.3, 0));
+  const shape = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xffffff }));
+  g.add(sq, shape); g.visible = false; g.matrixAutoUpdate = false;
+  scene.add(g); guides[id] = g;
+}
+function placeGuide(id) {
+  const c = S.cards[id], g = guides[id];
+  const y = new THREE.Vector3().crossVectors(c.nrm, c.xAxis).normalize();
+  const xA = new THREE.Vector3().crossVectors(y, c.nrm).normalize();
+  g.matrix.makeBasis(xA, y, c.nrm).setPosition(c.pos);
+  g.visible = S.guides;
+}
+
+/* ================= Loop ================= */
+function loop(now) {
+  const dt = Math.min(0.05, (now - (S.last || now)) / 1000) || 1 / 60;
+  S.last = now;
+  if (video.readyState >= 2) detectCards(now);
+
+  for (const id in guides) guides[id].visible = false;
+  for (const id in S.cards) if (now - S.cards[id].seen < STALE_MS) placeGuide(id);
+
+  const pair = choosePair();
+  if (pair && (!S.pair || pair[0] !== S.pair[0] || pair[1] !== S.pair[1])) { S.pair = pair; S.rope = null; }
+  if (S.pair) {
+    if (!S.rope) initRope();
+    stepRope(dt);
+    const len = buildTube();
+    tube.visible = true;
+    const span = S.cards[S.pair[0]].pos.distanceTo(S.cards[S.pair[1]].pos);
+    $("readout").textContent =
+      `${CARDS[S.pair[0]].name} → ${CARDS[S.pair[1]].name}   span ${span.toFixed(0)} mm   tube ${len.toFixed(0)} mm`;
+  } else {
+    tube.visible = false;
+    $("readout").textContent = "Show two cards";
+  }
+  updateChips(now);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+
+/* ================= Controls ================= */
+const chips = {};
+for (const [id, c] of Object.entries(CARDS)) {
+  const el = document.createElement("div");
+  el.className = "chip"; el.innerHTML = `<i></i>${id} ${c.name}`;
+  $("chips").append(el); chips[id] = el;
+}
+function updateChips(now) {
+  for (const id in chips) {
+    const c = S.cards[id];
+    const age = c ? now - c.seen : Infinity;
+    chips[id].className = "chip" + (age < STALE_MS ? " on" : age < Infinity ? " stale" : "");
+  }
+}
+
+const bindRange = (id, fmt, fn) => {
+  const el = $(id), out = $(id + "Out");
+  el.oninput = () => { fn(+el.value); out.textContent = fmt(+el.value); };
+};
+bindRange("slack", v => v.toFixed(2) + "×", v => { S.slack = v; if (S.locked && S.rope) S.rope.length = anchors()[0].distanceTo(anchors()[1]) * v; });
+bindRange("grav", v => v === 0 ? "0 g" : Math.abs(v).toFixed(2) + " g " + (v > 0 ? "↓" : "↑"), v => { S.gravity = v; });
+bindRange("stiff", v => v.toFixed(2), v => { S.stiffness = v; });
+bindRange("radius", v => v + " mm", v => { S.radius = v; });
+bindRange("fov", v => v + "°", v => { setLens(v); S.cards = {}; S.rope = null; S.pair = null; });
+
+const toggle = (id, key) => $(id).onclick = e => { S[key] = !S[key]; e.currentTarget.setAttribute("aria-pressed", String(S[key])); };
+toggle("lockBtn", "locked");
+toggle("releaseBtn", "release");
+toggle("guideBtn", "guides");
+$("resetBtn").onclick = () => {
+  S.cards = {}; S.pair = null; S.rope = null; S.release = false;
+  $("releaseBtn").setAttribute("aria-pressed", "false");
+};
+$("flipBtn").onclick = async () => {
+  S.facing = S.facing === "user" ? "environment" : "user";
+  try { await startCamera(); } catch (err) { showError("Could not switch camera: " + err.message); }
+};
+
+function showError(msg) { const el = $("startErr"); el.textContent = msg; el.hidden = false; $("start").hidden = false; }
+
+$("startBtn").onclick = async () => {
+  if (!window.isSecureContext || !navigator.mediaDevices) {
+    showError("The camera needs a secure page. Open this file via http://localhost or an https:// address.");
+    return;
+  }
+  if (!window.AR || !window.POS) { showError("The marker library didn't load. Check the connection and reload."); return; }
+  S.detector = new AR.Detector({ dictionaryName: "ARUCO_MIP_36h12", maxHammingDistance: 4 });
+  try {
+    await startCamera();
+    $("start").hidden = true;
+    requestAnimationFrame(loop);
+  } catch (err) {
+    showError(err.name === "NotAllowedError" ? "Camera permission was refused. Allow it in the browser and try again." : "Could not start: " + err.message);
+  }
+};
+</script>
+</body>
+</html>
