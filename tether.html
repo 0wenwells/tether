@@ -10,7 +10,7 @@
 /* Layout: camera stage fills the screen, one control rail along the bottom */
 :root{
   --ground:#101214; --panel:#1a1d20; --line:#2c3136;
-  --ink:#e9ecee; --muted:#8b949c; --accent:#ff4d6d;
+  --ink:#e9ecee; --muted:#8b949c; --accent:#ffd400;
   --ok:#3ddc84; --warn:#ffb020;
   --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
@@ -38,17 +38,20 @@ body{background:var(--ground);color:var(--ink);font:14px/1.45 var(--sans);displa
 #start h1{margin:0;font:600 22px/1.2 var(--sans);text-wrap:balance}
 #start p{margin:0;color:var(--muted)}
 #start ol{margin:0;padding-left:1.2em;color:var(--muted);display:grid;gap:4px}
+#start b{color:var(--ink);font-weight:600}
 #start .err{color:var(--warn)}
 
 #bar{border-top:1px solid var(--line);background:var(--panel);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center}
 .group{display:flex;align-items:center;gap:8px}
+.seg{display:flex}
+.seg button.tool + button.tool{border-left:0}
 .label{font:500 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
 .out{font:500 12px/1 var(--mono);min-width:4.5ch;font-variant-numeric:tabular-nums}
 input[type=range]{width:96px;accent-color:var(--accent)}
 button.tool{font:500 12px/1 var(--sans);color:var(--ink);background:transparent;border:1px solid var(--line);padding:9px 12px;cursor:pointer}
 button.tool:hover{border-color:var(--muted)}
 button.tool[aria-pressed="true"]{background:var(--ink);color:var(--ground);border-color:var(--ink)}
-button.primary{font:600 14px/1 var(--sans);color:#fff;background:var(--accent);border:0;padding:12px 16px;cursor:pointer;justify-self:start}
+button.primary{font:600 14px/1 var(--sans);color:#111;background:var(--accent);border:0;padding:12px 16px;cursor:pointer;justify-self:start}
 button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 </style>
 </head>
@@ -63,13 +66,13 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
   <div id="readout">–</div>
   <div id="start">
     <div class="card">
-      <h1>One card grows a tube. Two cards tether it.</h1>
+      <h1>Cards in view grow tubes. Choose how they connect.</h1>
       <ol>
-        <li>Print the card sheet at 100%. The black squares must be 50 mm.</li>
-        <li>Show one card for a tube with a free end, or two cards (15–40 cm apart) to pin both ends.</li>
-        <li>Cards can be printed, or shown on a phone screen.</li>
+        <li>Use 1 to 4 cards, printed at 100% (50 mm black squares) or shown on phone screens.</li>
+        <li>One card grows a tube with a free end. Each extra card can catch an end.</li>
+        <li>Pick a <b>Mode</b>: <b>Chain</b> threads one cable through every card in number order. <b>Pairs</b> joins 0–1 and 2–3. <b>Hub</b> runs a tube from the lowest card to each of the others.</li>
       </ol>
-      <p>The tube is a simulated cable. With two cards it is pinned to both. It sags, rests on the table and swings when you move a card. Its cross-section morphs from one card's shape to the other's.</p>
+      <p>The tubes are simulated cables. They sag or float with gravity, rest on the table and swing when a card moves.</p>
       <p id="startErr" class="err" hidden></p>
       <button class="primary" id="startBtn">Start camera</button>
     </div>
@@ -77,6 +80,14 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
 </div>
 
 <div id="bar">
+  <div class="group">
+    <span class="label">Mode</span>
+    <div class="seg" id="modes" role="group" aria-label="Mode">
+      <button class="tool" data-mode="chain" aria-pressed="true">Chain</button>
+      <button class="tool" data-mode="pairs" aria-pressed="false">Pairs</button>
+      <button class="tool" data-mode="hub" aria-pressed="false">Hub</button>
+    </div>
+  </div>
   <div class="group">
     <label class="label" for="slack">Slack</label>
     <input id="slack" type="range" min="1" max="2" step="0.01" value="1.25">
@@ -103,8 +114,8 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
     <span class="out" id="fovOut">62°</span>
   </div>
   <div class="group">
-    <button class="tool" id="lockBtn" aria-pressed="false" title="Fix the tube length so pulling the cards apart pulls it taut">Lock length</button>
-    <button class="tool" id="releaseBtn" aria-pressed="false" title="Unpin the second card's end and let it fall">Release end</button>
+    <button class="tool" id="lockBtn" aria-pressed="false" title="Fix each tube's length so pulling cards apart pulls it taut">Lock length</button>
+    <button class="tool" id="releaseBtn" aria-pressed="false" title="Unpin the far end of every tube and let it go">Release ends</button>
     <button class="tool" id="guideBtn" aria-pressed="true">Guides</button>
   </div>
   <div class="group">
@@ -131,19 +142,20 @@ const CARDS = {             // marker id -> cross-section shape (sides: 0 = circ
   3: { name: "Hexagon",  sides: 6 },
 };
 const DETECT_W    = 640;    // detection resolution (width)
-const STALE_MS    = 600;
-const HOLD_MS     = 1500;   // a card unseen this long lets go of its end
-const SOLO_MM     = 120;    // tube length with one card (× slack)    // a card unseen this long shows amber; its end stays where it was
-const N           = 28;     // rope particles
+const STALE_MS    = 600;    // a card unseen this long shows amber
+const HOLD_MS     = 1500;   // a card unseen this long lets go of its tube ends
+const SOLO_MM     = 120;    // length of a tube with a free end (× slack)
+const MAX_TUBES   = 3;      // 4 cards: chain and hub need 3, pairs needs 2
+const N           = 28;     // rope particles per tube
 const SUBSTEPS    = 4;
 const ITERATIONS  = 16;     // constraint passes per substep
 const GRAVITY     = 9810;   // mm/s²
 const DAMPING     = 0.992;
 const FRICTION    = 0.5;    // fraction of sliding speed lost on table contact
 const SEGMENTS    = 72;     // tube rings along its length
-const RING        = 48;
+const RING        = 48;     // points per ring (divisible by 3, 4 and 6 so corners land exactly)
 const CHECKS      = 6;      // checker squares around the tube (even, so the pattern meets itself)
-const CHECK_A     = "#111111", CHECK_B = "#ffd400";   // black and yellow     // points per ring (divisible by 3, 4 and 6 so corners land exactly)
+const CHECK_A     = "#111111", CHECK_B = "#ffd400";   // black and yellow
 const POS_FOLLOW  = 0.5;    // pose smoothing
 const NRM_FOLLOW  = 0.25;
 
@@ -159,11 +171,12 @@ const S = {
   DW: DETECT_W, DH: 480, hfov: 62, focal: 1,
   detector: null, posit: null,
   cards: {},          // id -> { pos, nrm, xAxis, seen }
-  pair: null,         // [idA, idB or null] — idB is null with one card: free end
-  rope: null,         // { x: Float64Array, p: Float64Array, length }
+  links: new Map(),   // "a-b" or "a-free" -> { key, a, b, rope, tube }
+  mode: "chain",
   slack: 1.25, radius: 7, stiffness: 0.35, gravity: 1, locked: false, release: false, guides: true,
   last: 0,
 };
+try { const m = localStorage.getItem("tether-mode"); if (["chain", "pairs", "hub"].includes(m)) S.mode = m; } catch {}
 
 /* ================= Stage 1: Camera ================= */
 async function startCamera() {
@@ -226,65 +239,116 @@ function detectCards(now) {
   }
 }
 
-// End A = the card the tube grew from (kept while it stays in view). End B = any other card in view, or null.
-function choosePair(now) {
-  const fresh = Object.keys(S.cards).map(Number)
+/* ================= Stage 4: Links (which cards connect, by mode) ================= */
+// Returns [a, b] pairs; b = null means a tube with a free end. null = nothing in view (hold last state).
+function wantedLinks(now) {
+  const f = Object.keys(S.cards).map(Number)
     .filter(id => now - S.cards[id].seen < HOLD_MS).sort((a, b) => a - b);
-  if (!fresh.length) return S.pair;                 // nothing in view: hold the last state
-  const prevA = S.pair ? S.pair[0] : null;
-  const a = fresh.includes(prevA) ? prevA : fresh[0];
-  const b = fresh.find(id => id !== a);
-  return [a, b === undefined ? null : b];
+  if (!f.length) return null;
+  if (f.length === 1) return [[f[0], null]];
+  if (S.mode === "chain") return f.slice(0, -1).map((a, i) => [a, f[i + 1]]);
+  if (S.mode === "hub")   return f.slice(1).map(b => [f[0], b]);
+  // pairs: 0–1 and 2–3; a lone member of a pair gets a free end
+  const out = [];
+  for (const [p, q] of [[0, 1], [2, 3]]) {
+    const hp = f.includes(p), hq = f.includes(q);
+    if (hp && hq) out.push([p, q]); else if (hp) out.push([p, null]); else if (hq) out.push([q, null]);
+  }
+  return out;
 }
 
-/* ================= Stage 4: Rope (Verlet, pinned at both cards) ================= */
-function upVector() {
-  const [a, b] = S.pair;
-  const up = S.cards[a].nrm.clone();
-  if (b !== null) up.add(S.cards[b].nrm);
+const keyOf = (a, b) => `${a}-${b === null ? "free" : b}`;
+
+// Keep existing tubes where possible. A tube whose far end changes (caught, released, or handed
+// to another card) keeps its rope and motion instead of starting again.
+function syncLinks(wanted) {
+  if (!wanted) return;
+  wanted = wanted.slice(0, MAX_TUBES);
+  const wantedKeys = new Set(wanted.map(([a, b]) => keyOf(a, b)));
+  const used = new Set();
+  // 1. Keep links that still exist; let new ones inherit from an old link on the same anchor card
+  const plan = wanted.map(([a, b]) => {
+    const key = keyOf(a, b), link = S.links.get(key);
+    if (link) used.add(key);
+    return { key, a, b, link };
+  });
+  for (const item of plan) {
+    if (item.link) continue;
+    item.donor = [...S.links.values()].find(l => l.a === item.a && !wantedKeys.has(l.key) && !used.has(l.key));
+    if (item.donor) used.add(item.donor.key);
+  }
+  // 2. Hand back tubes nobody needs, then 3. give the rest new tubes
+  for (const l of S.links.values()) if (!used.has(l.key)) freeTube(l.tube);
+  const next = new Map();
+  for (const { key, a, b, link, donor } of plan) {
+    next.set(key, link || { key, a, b, rope: donor ? donor.rope : null, tube: donor ? donor.tube : takeTube() });
+  }
+  S.links = next;
+}
+
+function clearLinks() {
+  for (const l of S.links.values()) freeTube(l.tube);
+  S.links = new Map();
+}
+
+/* ================= Stage 5: Rope (Verlet, pinned at its cards) ================= */
+function upVector(l) {
+  const up = S.cards[l.a].nrm.clone();
+  if (l.b !== null) up.add(S.cards[l.b].nrm);
   return up.normalize();
 }
 
-// Pin points just above each card. B is null with one card.
-function anchors() {
-  const A = S.cards[S.pair[0]], B = S.pair[1] !== null ? S.cards[S.pair[1]] : null;
+// Pin points just above each card. The far one is null for a free end.
+function anchors(l) {
+  const A = S.cards[l.a], B = l.b !== null ? S.cards[l.b] : null;
   return [
     A.pos.clone().addScaledVector(A.nrm, S.radius),
     B ? B.pos.clone().addScaledVector(B.nrm, S.radius) : null,
   ];
 }
 
-function targetLength() {
-  const [a, b] = anchors();
+function targetLength(l) {
+  const [a, b] = anchors(l);
   return (b ? a.distanceTo(b) : SOLO_MM) * S.slack;
 }
 
-function initRope() {
-  let [a, b] = anchors();
-  if (!b) b = a.clone().addScaledVector(S.cards[S.pair[0]].xAxis, SOLO_MM * S.slack);   // lay the free end along the card
+function initRope(l) {
+  let [a, b] = anchors(l);
+  if (!b) b = a.clone().addScaledVector(S.cards[l.a].xAxis, SOLO_MM * S.slack);   // lay a free end along the card
   const x = new Float64Array(N * 3), p = new Float64Array(N * 3);
   for (let i = 0; i < N; i++) {
     const v = a.clone().lerp(b, i / (N - 1));
     x.set([v.x, v.y, v.z], i * 3); p.set([v.x, v.y, v.z], i * 3);
   }
-  S.rope = { x, p, length: targetLength() };
+  l.rope = { x, p, length: targetLength(l) };
 }
 
-function stepRope(dt) {
-  const { x, p } = S.rope;
-  const up = upVector();
+function stepRope(l, dt) {
+  const { x, p } = l.rope;
+  const up = upVector(l);
   const g = up.clone().multiplyScalar(-GRAVITY * S.gravity);   // negative S.gravity = falls upwards
-  const [a, b] = anchors();
-  const pinB = !S.release && b !== null;            // free end when released or when there is only one card
-  if (!S.locked) S.rope.length += (targetLength() - S.rope.length) * 0.2;
-  const rest = S.rope.length / (N - 1);
+  const [a, b] = anchors(l);
+  const pinB = !S.release && b !== null;
+  if (!S.locked) l.rope.length += (targetLength(l) - l.rope.length) * 0.2;
+  const rest = l.rope.length / (N - 1);
 
-  // Table plane: through the lower card, facing up
-  const A = S.cards[S.pair[0]].pos, B = S.pair[1] !== null ? S.cards[S.pair[1]].pos : A;
-  const floor = A.dot(up) < B.dot(up) ? A : B;
-  const floorD = floor.dot(up);
+  // Table plane: through the lower of the tube's cards, facing up
+  const A = S.cards[l.a].pos, B = l.b !== null ? S.cards[l.b].pos : A;
+  const floorD = Math.min(A.dot(up), B.dot(up));
 
   const h = dt / SUBSTEPS, h2 = h * h;
+  const solve = (i, j, target, scale, pinJ) => {
+    const k = i * 3, m = j * 3;
+    const dx = x[m] - x[k], dy = x[m + 1] - x[k + 1], dz = x[m + 2] - x[k + 2];
+    const len = Math.hypot(dx, dy, dz) || 1e-6;
+    const diff = ((len - target) / len) * scale;
+    const wk = i === 0 ? 0 : 0.5, wj = pinJ ? 0 : 0.5;
+    const sum = wk + wj || 1;
+    x[k] += dx * diff * (wk / sum); x[k + 1] += dy * diff * (wk / sum); x[k + 2] += dz * diff * (wk / sum);
+    x[m] -= dx * diff * (wj / sum); x[m + 1] -= dy * diff * (wj / sum); x[m + 2] -= dz * diff * (wj / sum);
+    return len;
+  };
+
   for (let s = 0; s < SUBSTEPS; s++) {
     for (let i = 0; i < N; i++) {
       const k = i * 3;
@@ -297,31 +361,14 @@ function stepRope(dt) {
     for (let it = 0; it < ITERATIONS; it++) {
       x[0] = a.x; x[1] = a.y; x[2] = a.z;
       if (pinB) { const k = (N - 1) * 3; x[k] = b.x; x[k + 1] = b.y; x[k + 2] = b.z; }
-      for (let i = 0; i < N - 1; i++) {
-        const k = i * 3, j = k + 3;
-        const dx = x[j] - x[k], dy = x[j + 1] - x[k + 1], dz = x[j + 2] - x[k + 2];
-        const len = Math.hypot(dx, dy, dz) || 1e-6;
-        const diff = (len - rest) / len;
-        const wk = i === 0 ? 0 : 0.5;
-        const wj = (i + 1 === N - 1 && pinB) ? 0 : 0.5;
-        const sum = wk + wj || 1;
-        x[k] += dx * diff * (wk / sum); x[k + 1] += dy * diff * (wk / sum); x[k + 2] += dz * diff * (wk / sum);
-        x[j] -= dx * diff * (wj / sum); x[j + 1] -= dy * diff * (wj / sum); x[j + 2] -= dz * diff * (wj / sum);
-      }
-      // Bending: keep every second particle near its straight-line spacing (0 = rope, 1 = rod)
+      // Length: neighbours keep their spacing
+      for (let i = 0; i < N - 1; i++) solve(i, i + 1, rest, 1, i + 1 === N - 1 && pinB);
+      // Bending: every second particle stays near straight-line spacing (0 = rope, 1 = rod)
       if (S.stiffness > 0) {
-        const rest2 = rest * 2;
         for (let i = 0; i < N - 2; i++) {
-          const k = i * 3, j = k + 6;
-          const dx = x[j] - x[k], dy = x[j + 1] - x[k + 1], dz = x[j + 2] - x[k + 2];
-          const len = Math.hypot(dx, dy, dz) || 1e-6;
-          if (len >= rest2) continue;
-          const diff = ((len - rest2) / len) * S.stiffness * 0.5;
-          const wk = i === 0 ? 0 : 0.5;
-          const wj = (i + 2 === N - 1 && pinB) ? 0 : 0.5;
-          const sum = wk + wj || 1;
-          x[k] += dx * diff * (wk / sum); x[k + 1] += dy * diff * (wk / sum); x[k + 2] += dz * diff * (wk / sum);
-          x[j] -= dx * diff * (wj / sum); x[j + 1] -= dy * diff * (wj / sum); x[j + 2] -= dz * diff * (wj / sum);
+          const k = i * 3, m = k + 6;
+          const len = Math.hypot(x[m] - x[k], x[m + 1] - x[k + 1], x[m + 2] - x[k + 2]);
+          if (len < rest * 2) solve(i, i + 2, rest * 2, S.stiffness * 0.5, i + 2 === N - 1 && pinB);
         }
       }
       // Table contact with friction
@@ -337,7 +384,7 @@ function stepRope(dt) {
   }
 }
 
-/* ================= Stage 5: Profile (cross-section shapes, equal area, radial samples) ================= */
+/* ================= Stage 6: Profile (cross-section shapes, equal area, radial samples) ================= */
 const VERTEX_ANGLE = { 3: Math.PI / 2, 4: Math.PI / 4, 6: 0 };   // triangle point-up, square and hexagon flat-top
 function profile(sides) {
   const out = new Float32Array(RING * 2);
@@ -356,33 +403,13 @@ function profile(sides) {
 }
 const PROFILES = Object.fromEntries(Object.entries(CARDS).map(([id, c]) => [id, profile(c.sides)]));
 
-/* ================= Stage 6: Tube (rings along the rope, kept upright) ================= */
+/* ================= Stage 7: Tubes (rings along each rope, kept upright, checker skin) ================= */
 const renderer = new THREE.WebGLRenderer({ canvas: glCanvas, alpha: true, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, 4 / 3, 1, 20000);
 scene.add(new THREE.HemisphereLight(0xffffff, 0x404048, 1.6));
 const sun = new THREE.DirectionalLight(0xffffff, 1.8); sun.position.set(300, 600, 200); scene.add(sun);
-
-// Each ring has RING + 1 vertices: the last repeats the first so the checker can wrap without a smeared seam
-const RV = RING + 1;
-const tubeGeo = new THREE.BufferGeometry();
-const VERTS = (SEGMENTS + 1) * RV + 2;
-tubeGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(VERTS * 3), 3));
-tubeGeo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(VERTS * 2), 2));
-{
-  const idx = [];
-  for (let s = 0; s < SEGMENTS; s++) for (let k = 0; k < RING; k++) {
-    const a = s * RV + k, b = a + 1, c = a + RV, d = b + RV;
-    idx.push(a, c, b, b, c, d);
-  }
-  const capA = VERTS - 2, capB = VERTS - 1, lastRing = SEGMENTS * RV;
-  for (let k = 0; k < RING; k++) {
-    idx.push(capA, k + 1, k);
-    idx.push(capB, lastRing + k, lastRing + k + 1);
-  }
-  tubeGeo.setIndex(idx);
-}
 
 // Checker texture: 2 × 2 pixels, repeated, no smoothing, so edges stay crisp
 const checkerTex = (() => {
@@ -397,35 +424,57 @@ const checkerTex = (() => {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 })();
+const tubeMat = new THREE.MeshStandardMaterial({
+  map: checkerTex, roughness: 0.5, metalness: 0, flatShading: true, side: THREE.DoubleSide,
+  emissive: 0xffffff, emissiveMap: checkerTex, emissiveIntensity: 0.8,   // near-full yellow; black stays black
+});
 
-const tube = new THREE.Mesh(tubeGeo, new THREE.MeshStandardMaterial({
-  map: checkerTex, roughness: 0.5, metalness: 0.0, flatShading: true, side: THREE.DoubleSide,
-  emissive: 0xffffff, emissiveMap: checkerTex, emissiveIntensity: 0.8,   // near-full yellow everywhere; lighting only adds a little shading. Black stays black
-}));
-tube.frustumCulled = false; tube.visible = false;
-scene.add(tube);
+// Each ring has RING + 1 vertices: the last repeats the first so the checker wraps without a smeared seam
+const RV = RING + 1;
+const VERTS = (SEGMENTS + 1) * RV + 2;
+const TUBE_INDEX = (() => {
+  const idx = [];
+  for (let s = 0; s < SEGMENTS; s++) for (let k = 0; k < RING; k++) {
+    const a = s * RV + k, b = a + 1, c = a + RV, d = b + RV;
+    idx.push(a, c, b, b, c, d);
+  }
+  const capA = VERTS - 2, capB = VERTS - 1, lastRing = SEGMENTS * RV;
+  for (let k = 0; k < RING; k++) { idx.push(capA, k + 1, k); idx.push(capB, lastRing + k, lastRing + k + 1); }
+  return idx;
+})();
+
+// A fixed pool of tube meshes, handed out to links as they appear
+const tubePool = Array.from({ length: MAX_TUBES }, () => {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(VERTS * 3), 3));
+  geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(VERTS * 2), 2));
+  geo.setIndex(TUBE_INDEX);
+  const mesh = new THREE.Mesh(geo, tubeMat);
+  mesh.frustumCulled = false; mesh.visible = false;
+  scene.add(mesh);
+  return { geo, mesh, busy: false };
+});
+function takeTube() { const t = tubePool.find(t => !t.busy); t.busy = true; return t; }
+function freeTube(t) { t.busy = false; t.mesh.visible = false; }
 
 const curve = new THREE.CatmullRomCurve3(Array.from({ length: N }, () => new THREE.Vector3()), false, "centripetal");
 const tmp = { pt: new THREE.Vector3(), tan: new THREE.Vector3(), n: new THREE.Vector3(), b: new THREE.Vector3(), prevN: new THREE.Vector3() };
 
-function buildTube() {
-  const { x } = S.rope;
+function buildTube(l) {
+  const { x } = l.rope, geo = l.tube.geo;
   for (let i = 0; i < N; i++) curve.points[i].set(x[i * 3], x[i * 3 + 1], x[i * 3 + 2]);
   curve.updateArcLengths();
-  const up = upVector();
-  const pa = PROFILES[S.pair[0]], pb = PROFILES[S.pair[1] ?? S.pair[0]];
-  const pos = tubeGeo.attributes.position.array;
-  const uv = tubeGeo.attributes.uv.array;
-  const r = S.radius;
-  const len = curve.getLength();
-  // Square checks: cell size = circumference / CHECKS. Texture holds 2 cells per repeat.
-  const cell = (2 * Math.PI * r) / CHECKS;
+  const up = upVector(l);
+  const pa = PROFILES[l.a], pb = PROFILES[l.b ?? l.a];
+  const pos = geo.attributes.position.array, uv = geo.attributes.uv.array;
+  const r = S.radius, len = curve.getLength();
+  const cell = (2 * Math.PI * r) / CHECKS;              // square checks; the texture holds 2 cells per repeat
   tmp.prevN.copy(up);
   for (let s = 0; s <= SEGMENTS; s++) {
     const u = s / SEGMENTS;
     curve.getPointAt(u, tmp.pt);
     curve.getTangentAt(u, tmp.tan);
-    // Ring's "up" = world up with the tangent removed; reuse the last one if the tube hangs vertically
+    // Ring's "up" = world up with the tangent removed; reuse the last one if the tube runs vertically
     tmp.n.copy(up).addScaledVector(tmp.tan, -up.dot(tmp.tan));
     if (tmp.n.lengthSq() < 1e-4) tmp.n.copy(tmp.prevN); else tmp.n.normalize();
     tmp.prevN.copy(tmp.n);
@@ -444,18 +493,19 @@ function buildTube() {
       uv[v * 2 + 1] = (k / RING) * (CHECKS / 2);
     }
   }
-  const ends = [curve.getPointAt(0), curve.getPointAt(1)];
-  pos.set([ends[0].x, ends[0].y, ends[0].z], (VERTS - 2) * 3);
-  pos.set([ends[1].x, ends[1].y, ends[1].z], (VERTS - 1) * 3);
+  const e0 = curve.getPointAt(0), e1 = curve.getPointAt(1);
+  pos.set([e0.x, e0.y, e0.z], (VERTS - 2) * 3);
+  pos.set([e1.x, e1.y, e1.z], (VERTS - 1) * 3);
   uv.set([0, 0], (VERTS - 2) * 2);
   uv.set([len / (2 * cell), 0], (VERTS - 1) * 2);
-  tubeGeo.attributes.position.needsUpdate = true;
-  tubeGeo.attributes.uv.needsUpdate = true;
-  tubeGeo.computeVertexNormals();
+  geo.attributes.position.needsUpdate = true;
+  geo.attributes.uv.needsUpdate = true;
+  geo.computeVertexNormals();
+  l.tube.mesh.visible = true;
   return len;
 }
 
-/* ================= Stage 7: Guides (card outline + shape, drawn flat on each card) ================= */
+/* ================= Stage 8: Guides (card outline + shape, drawn flat on each card) ================= */
 const guides = {};
 for (const id of Object.keys(CARDS)) {
   const g = new THREE.Group();
@@ -485,23 +535,20 @@ function loop(now) {
   for (const id in guides) guides[id].visible = false;
   for (const id in S.cards) if (now - S.cards[id].seen < STALE_MS) placeGuide(id);
 
-  const pair = choosePair(now);
-  // Start a new tube only when the anchor card changes; a second card arriving or leaving just pins or frees end B
-  if (pair && (!S.pair || pair[0] !== S.pair[0])) S.rope = null;
-  S.pair = pair;
-  if (S.pair) {
-    if (!S.rope) initRope();
-    stepRope(dt);
-    const len = buildTube();
-    tube.visible = true;
-    const [a, b] = S.pair;
-    $("readout").textContent = b !== null
-      ? `${CARDS[a].name} → ${CARDS[b].name}   span ${S.cards[a].pos.distanceTo(S.cards[b].pos).toFixed(0)} mm   tube ${len.toFixed(0)} mm`
-      : `${CARDS[a].name} · free end   tube ${len.toFixed(0)} mm   (show a second card to pin it)`;
-  } else {
-    tube.visible = false;
-    $("readout").textContent = "Show a card";
+  syncLinks(wantedLinks(now));
+  let total = 0;
+  const parts = [];
+  for (const l of S.links.values()) {
+    if (!l.rope) initRope(l);
+    stepRope(l, dt);
+    total += buildTube(l);
+    parts.push(`${l.a}→${l.b === null ? "·" : l.b}`);
   }
+  const label = { chain: "Chain", pairs: "Pairs", hub: "Hub" }[S.mode];
+  $("readout").textContent = parts.length
+    ? `${label}   ${parts.join("  ")}   tube ${total.toFixed(0)} mm`
+    : `${label}   show a card`;
+
   updateChips(now);
   renderer.render(scene, camera);
   requestAnimationFrame(loop);
@@ -522,22 +569,33 @@ function updateChips(now) {
   }
 }
 
+function setMode(mode) {
+  S.mode = mode;
+  document.querySelectorAll("#modes button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
+  try { localStorage.setItem("tether-mode", mode); } catch {}
+}
+document.querySelectorAll("#modes button").forEach(b => b.onclick = () => setMode(b.dataset.mode));
+setMode(S.mode);
+
 const bindRange = (id, fmt, fn) => {
   const el = $(id), out = $(id + "Out");
   el.oninput = () => { fn(+el.value); out.textContent = fmt(+el.value); };
 };
-bindRange("slack", v => v.toFixed(2) + "×", v => { S.slack = v; if (S.locked && S.rope && S.pair) S.rope.length = targetLength(); });
+bindRange("slack", v => v.toFixed(2) + "×", v => {
+  S.slack = v;
+  if (S.locked) for (const l of S.links.values()) if (l.rope) l.rope.length = targetLength(l);
+});
 bindRange("grav", v => v === 0 ? "0 g" : Math.abs(v).toFixed(2) + " g " + (v > 0 ? "↓" : "↑"), v => { S.gravity = v; });
 bindRange("stiff", v => v.toFixed(2), v => { S.stiffness = v; });
 bindRange("radius", v => v + " mm", v => { S.radius = v; });
-bindRange("fov", v => v + "°", v => { setLens(v); S.cards = {}; S.rope = null; S.pair = null; });
+bindRange("fov", v => v + "°", v => { setLens(v); S.cards = {}; clearLinks(); });
 
 const toggle = (id, key) => $(id).onclick = e => { S[key] = !S[key]; e.currentTarget.setAttribute("aria-pressed", String(S[key])); };
 toggle("lockBtn", "locked");
 toggle("releaseBtn", "release");
 toggle("guideBtn", "guides");
 $("resetBtn").onclick = () => {
-  S.cards = {}; S.pair = null; S.rope = null; S.release = false;
+  S.cards = {}; clearLinks(); S.release = false;
   $("releaseBtn").setAttribute("aria-pressed", "false");
 };
 $("flipBtn").onclick = async () => {
